@@ -143,10 +143,21 @@ def predict(request: PredictionRequest, background_tasks: BackgroundTasks):
     return response_data
     
 @router.get("/history")
-async def get_history():
+async def get_history(lat: float = None, lon: float = None):
     db = get_database()
-    cursor = db.predictions.find().sort("timestamp", -1).limit(50)
+    query = {}
+    
+    if lat is not None and lon is not None:
+        # Use a small epsilon for float comparison
+        epsilon = 0.0001
+        query = {
+            "lat": {"$gte": lat - epsilon, "$lte": lat + epsilon},
+            "lon": {"$gte": lon - epsilon, "$lte": lon + epsilon}
+        }
+    
+    cursor = db.predictions.find(query).sort("timestamp", -1).limit(50)
     history = await cursor.to_list(length=50)
+    
     # Convert _id to string for JSON serialization
     for doc in history:
         doc["_id"] = str(doc["_id"])

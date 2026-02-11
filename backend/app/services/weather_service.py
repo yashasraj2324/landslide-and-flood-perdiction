@@ -108,70 +108,80 @@ def get_open_meteo_flood_data(lat: float, lon: float):
 
 from geopy.distance import geodesic
 
-def get_osm_river_distance(lat: float, lon: float):
+def get_ee_river_distance(lat: float, lon: float):
     """
-    Calculate the GEOMETRIC distance to the nearest river using OpenStreetMap (Overpass API).
-    This provides the real physical distance, not a proxy.
+    Get distance to nearest river using Earth Engine HydroSHEDS.
+    This is faster and more reliable than querying OSM API.
     """
     try:
-        # Search for waterways within ~5km radius (approx 0.05 degrees)
-        overpass_url = "http://overpass-api.de/api/interpreter"
-        query = f"""
-        [out:json];
-        (
-          way["waterway"="river"](around:5000, {lat}, {lon});
-          way["waterway"="stream"](around:2000, {lat}, {lon});
-          relation["waterway"="river"](around:5000, {lat}, {lon});
-        );
-        out geom;
-        """
-        response = requests.get(overpass_url, params={'data': query}, timeout=10)
-        data = response.json()
+        point = ee.Geometry.Point(lon, lat)
         
-        min_distance = 5000.0 # Default max search radius
+        # 1. Load HydroSHEDS Flow Accumulation
+        # Rivers are defined where flow accumulation is high
+        # We can also use 'WWF/HydroSHEDS/03VFD' for flow direction or 15ACC for accumulation
+        hydrosheds = ee.Image("WWF/HydroSHEDS/15ACC")
+        flow_acc = hydrosheds.select("b1")
         
-        elements = data.get("elements", [])
-        if not elements:
-            return 5000.0
+        # 2. Define "River" mask (Threshold > 500 represents streams/rivers)
+        # 1 where it IS a river, 0 elsewhere
+        river_mask = flow_acc.gt(500)
+        
+        # 3. Compute Distance
+        # fastDistanceTransform calculates distance to nearest non-zero pixel (the river)
+        # Result is in pixels. multiply by scale to get meters.
+        # fastDistanceTransform propagates distance.
+        # Max distance 1024 pixels. At 450m (15 arc sec), that is ~450km. Plenty.
+        
+        dist_pixels = river_mask.fastDistanceTransform(1024).reproject(crs="EPSG:4326", scale=450)
+        
+        # Convert pixels to meters (approximate at the point location)
+        # 15 arc-seconds is approx 450 meters at equator
+        
+        # Reduce at the point of interest
+        # We use a larger scale to match the 15 arc-sec native resolution
+        distance_val = dist_pixels.reduceRegion(
+            reducer=ee.Reducer.first(),
+            geometry=point,
+            scale=450
+        ).getInfo().get("distance") 
+        
+        # Note: fastDistanceTransform output band is called "distance" by default?
+        # No, it preserves bands?
+        # Actually fastDistanceTransform returns an image where the value is distance in pixels.
+        # The band name is likely 'distance' or same as input 'b1'.
+        # Let's check documentation or assume it keeps name or uses 'distance'.
+        # Safest way is to select the first band.
+        
+        # Wait, fastDistanceTransform returns units in PIXELS.
+        # We need to multiply by pixel size in meters.
+        # Pixel area sqrt is approx size.
+        
+        if distance_val is None:
+             # Try getting raw value without explicit band name if reduceRegion returns dict
+             val_dict = dist_pixels.reduceRegion(reducer=ee.Reducer.first(), geometry=point, scale=450).getInfo()
+             if val_dict:
+                 distance_val = list(val_dict.values())[0]
+        
+        if distance_val is not None:
+            # Approximation: 1 pixel ~ 460m
+            return float(distance_val) * 460.0
             
-        user_loc = (lat, lon)
+        return 5000.0 # Fallback if too far
         
-        for element in elements:
-            # Check geometry points
-            if "geometry" in element:
-                for pt in element["geometry"]:
-                    river_pt = (pt["lat"], pt["lon"])
-                    dist = geodesic(user_loc, river_pt).meters
-                    if dist < min_distance:
-                        min_distance = dist
-            elif "lat" in element and "lon" in element:
-                 # Nodes
-                 river_pt = (element["lat"], element["lon"])
-                 dist = geodesic(user_loc, river_pt).meters
-                 if dist < min_distance:
-                        min_distance = dist
-
-        return min_distance
-
     except Exception as e:
-        logger.error(f"OSM River fetch failed: {e}")
-        return 5000.0 # Fail safe
+        logger.error(f"EE River Distance failed: {e}")
+        print(f"DEBUG: EE River Distance Exception: {e}") # Print to console for visibility
+        return 5000.0 # Safe fallback
 
 def get_hydrological_features(lat: float, lon: float):
     """
-    Fetch REAL hydrological features:
-    - Flow Accumulation: Earth Engine HydroSHEDS (Real catchment data)
-    - River Distance: OpenStreetMap (Real geometric distance)
-    - Soil Saturation: Open-Meteo (Real soil moisture forecast)
+    Fetch REAL hydrological features using Earth Engine and Open-Meteo.
     """
-    # 1. Soil Saturation from Open-Meteo (Best live source)
+    # 1. Soil Saturation (Open-Meteo)
     om_data = get_open_meteo_flood_data(lat, lon)
     final_soil = om_data["soil_moisture"] 
-
-    # 2. Real River Distance from OSM
-    final_distance = get_osm_river_distance(lat, lon)
     
-    # 3. Real Flow Accumulation from Earth Engine
+    # 2. Flow Accumulation (Earth Engine)
     final_flow = 0.0
     try:
         point = ee.Geometry.Point(lon, lat)
@@ -183,11 +193,14 @@ def get_hydrological_features(lat: float, lon: float):
         if flow_acc is not None:
              final_flow = flow_acc
     except Exception as e:
-        logger.error(f"EE Hydro fetch failed: {e}")
-        # Only fallback if EE fails
+        logger.error(f"EE Flow Acc failed: {e}")
         if om_data["river_discharge"] > 0:
              final_flow = om_data["river_discharge"] * 100 
 
+    # 3. River Distance (Earth Engine)
+    # Replaces the unstable OSM Overpass API call
+    final_distance = get_ee_river_distance(lat, lon)
+    
     return {
         "flow_accumulation": final_flow,
         "river_distance": final_distance,

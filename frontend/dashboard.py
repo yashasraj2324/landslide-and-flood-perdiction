@@ -4,197 +4,289 @@ import folium
 from streamlit_folium import st_folium
 import requests
 import pandas as pd
+import plotly.graph_objects as go
 import plotly.express as px
-import time
 import os
 from datetime import datetime
 
-# Configuration
+# === CONFIGURATION ===
 API_URL = os.getenv("API_URL", "http://localhost:8000/api/v1/predict")
-st.set_page_config(page_title="Disaster Prediction AI", layout="wide", page_icon="⛈️")
+HISTORY_URL = API_URL.replace("/predict", "/history")
 
-# Custom CSS for "Premium" feel
+st.set_page_config(
+    page_title="Disaster Prediction AI", 
+    layout="wide", 
+    page_icon="⛈️",
+    initial_sidebar_state="expanded"
+)
+
+# === CUSTOM CSS FOR PROFESSIONAL DASHBOARD ===
 st.markdown("""
 <style>
+    /* Global Background */
     .stApp {
         background-color: #0e1117;
-        color: #fafafa;
     }
-    .main-metric {
-        font_size: 3em;
-        font-weight: bold;
-        color: #4CAF50;
+    
+    /* Card Container Styling */
+    div[data-testid="stContainer"] {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 15px;
     }
-    .risk-high { color: #FF4B4B; }
-    .risk-medium { color: #FFA500; }
-    .risk-low { color: #4CAF50; }
+
+    /* Metric Values */
+    [data-testid="stMetricValue"] {
+        font-size: 1.4rem !important;
+        color: #e6edf3;
+    }
+    
+    /* Metric Labels */
+    [data-testid="stMetricLabel"] {
+        color: #8b949e;
+        font-size: 0.85rem !important;
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 40px;
+        white-space: pre-wrap;
+        border-radius: 4px 4px 0px 0px;
+        color: #8b949e;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #161b22;
+        color: #58a6ff;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⛈️ Real-Time Landslide & Flood Prediction System")
-st.markdown("### 🇮🇳 Production-Ready AI Dashboard | India Region")
+# === HELPER FUNCTIONS ===
+def create_gauge(value, title, color_stops):
+    """Creates a gauge chart for risk visualization"""
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=value * 100,  # Convert 0-1 to Percentage
+        title={'text': title, 'font': {'size': 18, 'color': "#e6edf3"}},
+        number={'suffix': "%", 'font': {'color': "#e6edf3"}},
+        gauge={
+            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "#30363d"},
+            'bar': {'color': "#1f6feb"},
+            'bgcolor': "rgba(0,0,0,0)",
+            'borderwidth': 2,
+            'bordercolor': "#30363d",
+            'steps': color_stops,
+            'threshold': {
+                'line': {'color': "white", 'width': 4},
+                'thickness': 0.75,
+                'value': value * 100
+            }
+        }
+    ))
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font={'color': "#e6edf3"},
+        margin=dict(l=20, r=20, t=30, b=20),
+        height=180
+    )
+    return fig
 
-# Sidebar
+# === HEADER ===
+col_h1, col_h2 = st.columns([3, 1])
+with col_h1:
+    st.title("⛈️ Sentinel AI: Disaster Prediction")
+    st.caption("Real-Time Landslide & Flood Monitoring System | Live Production Environment")
+with col_h2:
+    st.write("") 
+    st.markdown(f"**System Status:** 🟢 Online")
+    st.caption(f"Last Update: {datetime.now().strftime('%H:%M:%S UTC')}")
+
+# === SIDEBAR ===
 with st.sidebar:
-    st.header("System Status")
-    st.success("API Connected: ✅ via Localhost")
-    st.info("Models Loaded: XGBoost, Random Forest")
+    st.header("⚙️ Controls")
     
-    st.divider()
-    st.markdown("### 📡 Live Feeds")
-    st.checkbox("Show Rainfall Radar (GPM)", True)
-    st.checkbox("Show Terrain Slope", False)
+    with st.container():
+        st.subheader("Data Layers")
+        show_radar = st.toggle("Rainfall Radar (GPM)", True)
+        show_slope = st.toggle("Terrain Slope Map", False)
     
-    st.divider()
-    auto_refresh = st.checkbox("Auto-Refresh (10 min)", value=True)
-    if auto_refresh:
-        time.sleep(1) # formatting placeholder
-        # st_autorefresh(interval=600000) # Optional dependency
+    with st.container():
+        st.subheader("API Status")
+        if st.button("Ping Backend"):
+            try:
+                requests.get(API_URL.replace("/predict", "/health"), timeout=2)
+                st.success("Backend Connected")
+            except:
+                st.error("Backend Unreachable")
 
-# Layout
-col1, col2 = st.columns([2, 1])
+# === MAIN LAYOUT ===
+col_map, col_dash = st.columns([1.5, 1.2])
 
-# Map Section
-with col1:
-    st.subheader("📍 Select Location (Click on Map)")
-    
-    # Base Map (defaults to India center)
-    m = folium.Map(location=[20.5937, 78.9629], zoom_start=5, tiles="CartoDB dark_matter")
-    
-    # Event Data from Map Click
-    map_data = st_folium(m, width="100%", height=500)
-
-# Prediction Logic
-if map_data and map_data.get("last_clicked"):
-    lat = map_data["last_clicked"]["lat"]
-    lon = map_data["last_clicked"]["lng"]
-    
-    with st.spinner(f"Fetching Satellite Data for {lat:.4f}, {lon:.4f}..."):
-        try:
-            # Call FastAPI Backend
-            payload = {"lat": lat, "lon": lon}
-            response = requests.post(API_URL, json=payload, timeout=60)
+# --- LEFT: MAP SECTION ---
+with col_map:
+    with st.container():
+        st.subheader("📍 Select Location")
+        
+        # Base Map
+        m = folium.Map(location=[20.5937, 78.9629], zoom_start=5, tiles="CartoDB dark_matter")
+        
+        if show_slope:
+            folium.TileLayer(
+                tiles='https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                attr='Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)',
+                name='Terrain'
+            ).add_to(m)
             
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Display Results
-                with col2:
-                    st.subheader("📊 Prediction Results")
-                    st.markdown(f"**📍 Location:** {data.get('location_name', 'Unknown')}")
-                    
-                    # Risk Level Display
-                    landslide_risk = data['landslide_risk_level']
-                    flood_risk = data['flood_risk_level']
-                    
-                    risk_color = "risk-high" if landslide_risk == "High" else "risk-medium" if landslide_risk == "Medium" else "risk-low"
-                    st.markdown(f"### Landslide Risk: <span class='{risk_color}'>{landslide_risk}</span>", unsafe_allow_html=True)
-                    st.progress(data['landslide_probability'])
-                    
-                    risk_color_flood = "risk-high" if flood_risk == "High" else "risk-medium" if flood_risk == "Medium" else "risk-low"
-                    st.markdown(f"### Flood Risk: <span class='{risk_color_flood}'>{flood_risk}</span>", unsafe_allow_html=True)
-                    st.progress(data['flood_probability'])
-                    
-                    # === Weather Widget ===
-                    st.divider()
-                    st.subheader(f"Current Weather: {data.get('weather_desc', '').title()}")
-                    
-                    w_row1_c1, w_row1_c2 = st.columns(2)
-                    with w_row1_c1:
-                         # Icon + Description
-                         if data.get("weather_icon"):
-                            st.image(f"http://openweathermap.org/img/wn/{data['weather_icon']}@2x.png", width=80)
-                         st.caption(f"{data.get('weather_desc', '').title()}")
-                    with w_row1_c2:
-                        st.metric("Temperature", f"{data.get('temperature', 0):.1f}°C")
-                    
-                    w_row2_c1, w_row2_c2 = st.columns(2)
-                    with w_row2_c1:
-                        st.metric("Wind Speed", f"{data.get('wind_speed', 0):.1f} m/s")
-                    with w_row2_c2:
-                        st.metric("Humidity", f"{data.get('humidity', 0)}%")
+        # Capture Click
+        map_data = st_folium(m, width="100%", height=650)
 
-                    st.divider()
+# --- RIGHT: DASHBOARD SECTION ---
+with col_dash:
+    # Check if user clicked the map
+    if map_data and map_data.get("last_clicked"):
+        lat = map_data["last_clicked"]["lat"]
+        lon = map_data["last_clicked"]["lng"]
+        
+        st.info(f"Analyzing Coordinates: **{lat:.4f}, {lon:.4f}**")
+        
+        with st.spinner("Fetching Satellite & Sensor Data..."):
+            try:
+                # 1. PREDICTION API CALL
+                payload = {"lat": lat, "lon": lon}
+                response = requests.post(API_URL, json=payload, timeout=30)
+                
+                if response.status_code == 200:
+                    data = response.json()
                     
-                    # Environmental Metrics - Row 1
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("🌧️ Rain (24h)", f"{data['rainfall_24h']:.1f} mm")
-                    c2.metric("🌧️ Rain (72h)", f"{data['rainfall_72h']:.1f} mm")
-                    c3.metric("💧 Soil Sat.", f"{data['soil_saturation']:.2f}")
-
-                    # Environmental Metrics - Row 2
-                    c4, c5, c6 = st.columns(3)
-                    c4.metric("🧪 Soil pH", f"{data['soil_ph']:.1f}")
-                    c5.metric("⛰️ Elevation", f"{data['elevation']:.0f} m")
-                    c6.metric("📉 Slope", f"{data['slope']:.1f}°")
-
-                    # Environmental Metrics - Row 3
-                    c7, c8, c9 = st.columns(3)
-                    c7.metric("🌊 River Dist.", f"{data['river_distance']:.0f} m")
-                    c8.metric("🌊 Flow Acc.", f"{data['flow_accumulation']:.0f}")
-                    c9.metric("💧 Humidity", f"{data['humidity']:.0f}%")
-
-                    # Environmental Metrics - Row 4
-                    c10, c11 = st.columns(2)
-                    c10.metric("🌡️ Pressure", f"{data['pressure']} hPa")
-                    c11.write("") # Spacer or additional metric
+                    # === ROW 1: RISK GAUGES ===
+                    st.subheader("⚠️ Risk Assessment")
+                    r1, r2 = st.columns(2)
                     
-                    st.caption(f"NDVI: {data['ndvi']} | Lat/Lon: {lat:.4f}, {lon:.4f}")
-                
-                # === Historical Trends ===
-                st.divider()
-                st.subheader("📈 Historical Trends (Real-Time Log)")
-                
-                # Derive History URL from Predict URL
-                HISTORY_URL = API_URL.replace("/predict", "/history")
-                
-                try:
-                    hist_response = requests.get(HISTORY_URL, timeout=5)
-                    if hist_response.status_code == 200:
-                        hist_data = hist_response.json()
-                        if hist_data:
-                            df_hist = pd.DataFrame(hist_data)
-                            df_hist['timestamp'] = pd.to_datetime(df_hist['timestamp'])
-                            df_hist = df_hist.sort_values('timestamp')
-                            
-                            # Filter for relevant columns if they exist
-                            cols = ['timestamp', 'landslide_probability', 'flood_probability', 'rainfall_24h', 'soil_saturation']
-                            # Ensure columns exist (for old data)
-                            for c in cols:
-                                if c not in df_hist.columns:
-                                    df_hist[c] = 0.0
-                            
-                            tab1, tab2 = st.tabs(["⚠️ Risk Trends", "🌍 Environmental Trends"])
-                            
-                            with tab1:
-                                fig_risk = px.line(df_hist, x='timestamp', y=['landslide_probability', 'flood_probability'],
-                                                  title="Disaster Risk Over Time",
-                                                  labels={'value': 'Probability (0-1)', 'timestamp': 'Time'},
-                                                  color_discrete_map={'landslide_probability': '#FF4B4B', 'flood_probability': '#FFA500'})
-                                fig_risk.update_layout(template="plotly_dark", height=350)
-                                st.plotly_chart(fig_risk, use_container_width=True)
+                    with r1:
+                        # Landslide Gauge
+                        fig_ls = create_gauge(
+                            data.get('landslide_probability', 0), 
+                            "Landslide Risk", 
+                            [{'range': [0, 50], 'color': "#238636"}, 
+                             {'range': [50, 80], 'color': "#d29922"}, 
+                             {'range': [80, 100], 'color': "#da3633"}]
+                        )
+                        st.plotly_chart(fig_ls, use_container_width=True, config={'displayModeBar': False})
+                        st.caption(f"Risk Level: **{data.get('landslide_risk_level', 'Unknown')}**")
+
+                    with r2:
+                        # Flood Gauge
+                        fig_fl = create_gauge(
+                            data.get('flood_probability', 0), 
+                            "Flood Risk",
+                            [{'range': [0, 50], 'color': "#238636"}, 
+                             {'range': [50, 80], 'color': "#d29922"}, 
+                             {'range': [80, 100], 'color': "#1f6feb"}]
+                        )
+                        st.plotly_chart(fig_fl, use_container_width=True, config={'displayModeBar': False})
+                        st.caption(f"Risk Level: **{data.get('flood_risk_level', 'Unknown')}**")
+                    
+                    # === ROW 2: ENVIRONMENTAL METRICS ===
+                    st.subheader("🌍 Environmental Telemetry")
+                    
+                    # Weather Card
+                    with st.container():
+                        c1, c2 = st.columns([1, 3])
+                        with c1:
+                             # Display icon if available from API, else generic
+                             icon_code = data.get('weather_icon', '01d')
+                             st.image(f"http://openweathermap.org/img/wn/{icon_code}@2x.png", width=80)
+                        with c2:
+                             st.markdown(f"#### {data.get('weather_desc', 'Clear').title()}")
+                             st.caption(f"Temp: {data.get('temperature', 0)}°C | Wind: {data.get('wind_speed', 0)} m/s")
+
+                    # Metrics Grid
+                    with st.container():
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric("Rain (24h)", f"{data.get('rainfall_24h', 0):.1f} mm")
+                        m2.metric("Soil Saturation", f"{data.get('soil_saturation', 0):.2f}")
+                        m3.metric("Slope", f"{data.get('slope', 0):.1f}°")
+                        
+                        m4, m5, m6 = st.columns(3)
+                        m4.metric("Elevation", f"{data.get('elevation', 0)} m")
+                        m5.metric("River Dist.", f"{data.get('river_distance', 0):.0f} m")
+                        m6.metric("Flow Acc.", f"{data.get('flow_accumulation', 0):.0f}")
+
+                    # === ROW 3: HISTORICAL DATA ===
+                    st.subheader("📈 Historical Trends")
+                    
+                    try:
+                        # 2. HISTORY API CALL
+                        # Pass lat/lon to filter history if supported by backend, otherwise it returns global history
+                        hist_response = requests.get(HISTORY_URL, params={"lat": lat, "lon": lon}, timeout=10)
+                        
+                        if hist_response.status_code == 200:
+                            hist_data = hist_response.json()
+                            if hist_data:
+                                df_hist = pd.DataFrame(hist_data)
                                 
-                            with tab2:
-                                fig_env = px.line(df_hist, x='timestamp', y=['rainfall_24h', 'soil_saturation'],
-                                                 title="Rainfall & Soil Saturation Trends",
-                                                  labels={'value': 'Value', 'timestamp': 'Time'},
-                                                  color_discrete_map={'rainfall_24h': '#00B4D8', 'soil_saturation': '#80FFDB'})
-                                fig_env.update_layout(template="plotly_dark", height=350)
-                                st.plotly_chart(fig_env, use_container_width=True)
+                                # Normalize column names (Backend uses 'landslide_prob', Frontend expects 'landslide_probability')
+                                col_map = {
+                                    'landslide_prob': 'landslide_probability',
+                                    'flood_prob': 'flood_probability',
+                                    'rain_24h': 'rainfall_24h'
+                                }
+                                df_hist.rename(columns=col_map, inplace=True)
+                                
+                                if 'timestamp' in df_hist.columns and 'landslide_probability' in df_hist.columns:
+                                    df_hist['timestamp'] = pd.to_datetime(df_hist['timestamp'])
+                                    
+                                    # Plot Area Chart
+                                    fig_hist = px.area(
+                                        df_hist, 
+                                        x='timestamp', 
+                                        y=['landslide_probability', 'flood_probability'],
+                                        labels={'value': 'Probability', 'timestamp': 'Time'},
+                                        color_discrete_map={'landslide_probability': '#da3633', 'flood_probability': '#1f6feb'}
+                                    )
+                                    fig_hist.update_layout(
+                                        template="plotly_dark", 
+                                        paper_bgcolor='rgba(0,0,0,0)',
+                                        plot_bgcolor='rgba(0,0,0,0)',
+                                        height=250,
+                                        margin=dict(l=0, r=0, t=10, b=0),
+                                        legend=dict(orientation="h", y=1.1)
+                                    )
+                                    st.plotly_chart(fig_hist, use_container_width=True)
+                                else:
+                                    st.warning("Historical data missing required columns for plotting.")
+                            else:
+                                st.info("No historical records found for this location.")
                         else:
-                            st.info("No historical data available yet.")
-                    else:
-                        st.warning("Could not fetch history.")
-                except Exception as e:
-                     st.error(f"History fetch error: {e}")
-                
-            else:
-                st.error(f"API Error: {response.status_code} - {response.text}")
-                
-        except Exception as e:
-            st.error(f"Connection Failed: {e}. Is Backend running?")
+                            st.warning("Could not fetch historical trends.")
+                            
+                    except Exception as e:
+                        st.error(f"History API Error: {str(e)}")
+
+                else:
+                    st.error(f"Prediction API Error: {response.status_code}")
+                    st.text(response.text)
             
-else:
-    with col2:
-        st.info("👈 Click on the map to analyze a specific location.")
-        st.write("System monitors real-time satellite feeds from NASA GPM and soil moisture content.")
+            except requests.exceptions.ConnectionError:
+                st.error("🚨 Connection Error: Is the Backend API running?")
+            except Exception as e:
+                st.error(f"An unexpected error occurred: {str(e)}")
+
+    else:
+        # EMPTY STATE (Waiting for user click)
+        with st.container():
+            st.info("👈 **Waiting for Input**")
+            st.markdown("""
+            Please click on the map to select a location for analysis.
+            
+            **System Capabilities:**
+            * Real-time Rainfall Analysis (GPM)
+            * Soil Moisture & Saturation Levels
+            * Topological Slope & Elevation Data
+            """)
