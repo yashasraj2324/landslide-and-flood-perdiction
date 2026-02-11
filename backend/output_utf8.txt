@@ -1,0 +1,7 @@
+﻿--- Inspecting ../models/landslide_xgb.pkl ---
+Type: <class 'xgboost.sklearn.XGBClassifier'>
+Feature Names (sklearn/standard): ['elevation' 'rainfall' 'soil_ph' 'slope']
+--- Inspecting ../models/flood_model_v2_final.pkl ---
+Type: <class 'lightgbm.sklearn.LGBMClassifier'>
+Feature Names (sklearn/standard): ['lat' 'lon' 'rain_24h' 'rain_72h' 'soil_saturation' 'elevation' 'slope'
+ 'flow_accumulation' 'river_distance']

@@ -1,0 +1,43 @@
+
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb://mongo:27017
+      - EARTH_ENGINE_KEY_FILE=/app/docllm-470505-b90060292a4f.json
+      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
+      - MODEL_PATH_LANDSLIDE=/app/models/landslide_xgb.pkl
+      - MODEL_PATH_FLOOD=/app/models/flood_model_v2_final.pkl
+      - MODEL_PATH_THRESHOLD=/app/models/threshold.pkl
+    depends_on:
+      - mongo
+    volumes:
+      - ./backend:/app
+      - ./models:/app/models
+    
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://backend:8000/api/v1/predict
+    depends_on:
+      - backend
+
+  mongo:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:

@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+pydantic
+requests
+earthengine-api
+pandas
+xgboost
+scikit-learn
+motor
+apscheduler
+python-dotenv
+geopandas
+joblib
+numpy
+httpx
+geopy
