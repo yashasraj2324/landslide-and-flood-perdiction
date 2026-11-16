@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets
+.env
+service-account.json
+
+# Generated inspection / script output
+backend/inspection.*
+backend/output*.txt
+.ipynb_checkpoints/

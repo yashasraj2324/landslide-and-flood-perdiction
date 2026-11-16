@@ -6,7 +6,7 @@
 
 ## 📌 Project Overview
 
-This system leverages **satellite data (NASA GPM, soil moisture)** and **machine learning models (XGBoost, Random Forest)** to provide real-time landslide and flood risk assessments for any location in India. The interactive dashboard allows users to select locations on a map and instantly visualize disaster probabilities, environmental metrics, and historical trends.
+This system leverages **satellite data (NASA GPM, soil moisture)** and **machine learning models (XGBoost for landslide, LightGBM for flood)** to provide real-time landslide and flood risk assessments for any location in India. The interactive dashboard allows users to select locations on a map and instantly visualize disaster probabilities, environmental metrics, and historical trends.
 
 ## ✨ Key Features
 
@@ -55,7 +55,7 @@ graph TD
     subgraph Core_Logic [Processing & AI]
         FE[Feature Engineering]
         ML_L[Landslide Model<br/>XGBoost]
-        ML_F[Flood Model]
+        ML_F[Flood Model<br/>LightGBM]
     end
   
     API --> FE
@@ -81,7 +81,7 @@ graph TD
 | **Backend**    | **FastAPI**                 | High-performance API for model inference and data processing. |
 | **Hosting**    | **Uvicorn**                 | ASGI server for running the FastAPI application.              |
 | **Database**   | **MongoDB (Motor)**         | Async database driver for storing historical data and logs.   |
-| **ML Models**  | **XGBoost, Scikit-learn**   | Predictive models for landslide and flood probability.        |
+| **ML Models**  | **XGBoost, LightGBM, Scikit-learn** | Predictive models for landslide and flood probability.        |
 | **Geospatial** | **Google Earth Engine API** | Satellite imagery and environmental data retrieval.           |
 | **Frontend**   | **Streamlit**               | Interactive web dashboard for visualization.                  |
 | **Mapping**    | **Folium**                  | Leaflet-based maps for location selection and data overlay.   |
@@ -102,8 +102,8 @@ graph TD
 1. **Clone the Repository**
 
    ```bash
-   git clone https://github.com/your-repo/landslide-prediction.git
-   cd landslide-prediction
+   git clone https://github.com/yashasraj2324/landslide-and-flood-perdiction.git
+   cd landslide-and-flood-perdiction
    ```
 2. **Configure Credentials**
 
@@ -159,6 +159,24 @@ If you prefer running without Docker, follow these steps:
 
 ---
 
+## 🧪 Models & Evaluation
+
+Facts below come from the training notebooks (`notebooks/`) and `models/`. Metrics are the values printed in the notebook outputs, on a single random 80/20 split (`random_state=42`); nothing was re-run for this README.
+
+| | Landslide | Flood |
+|---|---|---|
+| Model | `XGBClassifier` (300 trees, depth 6) | `LGBMClassifier` (600 trees, 64 leaves) |
+| Features | `elevation`, `rainfall`, `soil_ph`, `slope` | `lat`, `lon`, `rain_24h`, `rain_72h`, `soil_saturation`, `elevation`, `slope`, `flow_accumulation`, `river_distance` |
+| Rows | 31,545 (25,236 train / 6,309 test) | 33,373 (26,698 train / 6,675 validation) |
+| Positives | 3,154 (10%) | 912 (2.7%) |
+| Decision threshold | 0.5 (`models/threshold.pkl`) | 0.25 (notebook evaluation) |
+
+**Flood** (validation set, threshold 0.25): ROC-AUC 0.984; flood class precision 0.65, recall 0.81, F1 0.72. The split is random, not spatial, and `lat`/`lon` are features, so neighbouring points can land on both sides of the split and these numbers are likely optimistic.
+
+**Landslide** (test set, threshold 0.5): accuracy 0.70; landslide class precision 0.11, recall 0.29, F1 0.16. These labels are not real landslide events: the join against the GSI landslide inventory produced no positive labels, so the notebook assigns 10% of rows as landslides at random (`No positive landslide labels found from GSI data. Simulating 10% positive labels.`). Treat the landslide output as a placeholder, not a validated predictor.
+
+---
+
 ## 📖 Usage Guide
 
 1. **Open the Dashboard**: Navigate to `http://localhost:8501`.
@@ -175,7 +193,7 @@ If you prefer running without Docker, follow these steps:
 ## 📂 Project Structure
 
 ```
-land_slide/
+landslide-and-flood-perdiction/
 ├── backend/                # FastAPI application
 │   ├── app/                # Main application logic
 │   │   ├── api/            # API endpoints
